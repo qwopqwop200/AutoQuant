@@ -1,4 +1,6 @@
 # AutoQuant
+**I'm currently working on adding GPTQ.**
+
 An easy-to-use LLMs quantization package
 
 Unlike [AutoGPTQ](https://github.com/PanQiWei/AutoGPTQ) and [AutoAWQ](https://github.com/casper-hansen/AutoAWQ), AutoQuant aims to be a simple but expandable package. So if you want speed, I don't recommend using AutoQuant.
