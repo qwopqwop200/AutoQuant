@@ -14,7 +14,7 @@ common_setup_kwargs = {
     "author": "qwopqwop",
     "license": "MIT",
     "python_requires": ">=3.8.0",
-    "description": "AutoQuant",
+    "description": "AutoQuant: An easy-to-use LLMs quantization package",
     "long_description": (Path(__file__).parent / "README.md").read_text(encoding="UTF-8"),
     "long_description_content_type": "text/markdown",
     "url": "https://github.com/qwopqwop200/AutoQuant",
