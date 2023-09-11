@@ -125,7 +125,7 @@ class BaseQuantForCausalLM(nn.Module, PushToHubMixin, GenerationMixin):
             safe_save(shard, os.path.join(save_dir, shard_file), {'format': "pt", 'auto_quant_version': str(__version__)})
             
         if index is not None:
-            save_index_file = os.path.join(args.save_path, SAFE_WEIGHTS_INDEX_NAME)
+            save_index_file = os.path.join(save_dir, SAFE_WEIGHTS_INDEX_NAME)
             # Save the index as well
             with open(save_index_file, "w", encoding="utf-8") as f:
                 content = json.dumps(index, indent=2, sort_keys=True) + "\n"
