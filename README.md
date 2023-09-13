@@ -66,7 +66,7 @@ Run inference on a quantized model from Huggingface:
 from auto_quant import AutoAWQForCausalLM
 from transformers import AutoTokenizer
 
-quant_path = "casperhansen/vicuna-7b-v1.5-awq"
+quant_path = "opt-125m-awq"
 
 model = AutoAWQForCausalLM.from_quantized(quant_path)
 tokenizer = AutoTokenizer.from_pretrained(quant_path, trust_remote_code=True)
