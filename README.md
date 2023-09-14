@@ -1,9 +1,10 @@
 # AutoQuant
-**I'm currently working on adding GPTQ.**
-
 An easy-to-use LLMs quantization package
 
 Unlike [AutoGPTQ](https://github.com/PanQiWei/AutoGPTQ) and [AutoAWQ](https://github.com/casper-hansen/AutoAWQ), AutoQuant aims to be a simple but expandable package. So if you want speed, I don't recommend using AutoQuant.
+
+*Latest News* 🔥
+- [2023/09] Support GPTQ Quantization method
 
 ## Install
 ### Build source
@@ -19,59 +20,51 @@ Below, you will find examples of how to easily quantize a model and run inferenc
 ```python
 import torch
 from transformers import AutoTokenizer
-from auto_quant import AutoAWQForCausalLM, AWQConfig
+from auto_quant import AutoQuantForCausalLM, AutoQuantConfig, get_calib_dataset
 from datasets import load_dataset
-
-def get_calib_dataset(tokenizer, n_samples=512, block_size=512):
-    dataset = load_dataset("mit-han-lab/pile-val-backup", split="validation")
-    dataset = dataset.shuffle(seed=42)
-    samples = []
-    n_run = 0
-    for data in dataset:
-        line = data["text"]
-        line = line.strip()
-        line_encoded = tokenizer.encode(line)
-        if len(line_encoded) > 512:
-            continue
-        sample = torch.tensor([line_encoded])
-        if sample.numel() == 0:
-            continue
-        samples.append(sample)
-        n_run += 1
-        if n_run == n_samples:
-            break
-    # now concatenate all samples and split according to block size
-    cat_samples = torch.cat(samples, dim=1)
-    n_split = cat_samples.shape[1] // block_size
-    return [cat_samples[:, i*block_size:(i+1)*block_size] for i in range(n_split)]
 
 pretrained_model_dir = "facebook/opt-125m"
 quant_model_dir = "opt-125m-awq"
 
-quant_config = AWQConfig(bits=4,group_size=128)
+quant_config = AutoQuantConfig('AWQ',bits=4,group_size=128)
 tokenizer = AutoTokenizer.from_pretrained(pretrained_model_dir, use_fast=True)
-model = AutoAWQForCausalLM.from_pretrained(pretrained_model_dir, quant_config)
+model = AutoQuantForCausalLM.from_pretrained(pretrained_model_dir, quant_config)
 
-model.quantize(get_calib_dataset(tokenizer))
+model.quantize(get_calib_dataset(tokenizer, 'pile'))
 
-model.save_quantized(quant_model_dir,max_shard_size='100MB')
+model.save_quantized(quant_model_dir ,use_safetensors=True)
 tokenizer.save_pretrained(quant_model_dir)
 ```
 
 ### Inference
 
-Run inference on a quantized model from Huggingface:
-
 ```python
-from auto_quant import AutoAWQForCausalLM
+from auto_quant import AutoQuantForCausalLM
 from transformers import AutoTokenizer
 
 quant_path = "opt-125m-awq"
 
-model = AutoAWQForCausalLM.from_quantized(quant_path)
+model = AutoQuantForCausalLM.from_quantized(quant_path, device_map='auto')
 tokenizer = AutoTokenizer.from_pretrained(quant_path, trust_remote_code=True)
 
-model.generate(...)
+print(tokenizer.decode(model.generate(**tokenizer("auto_quant is", return_tensors="pt").to(model.device))[0]))
+```
+
+### Evaluation
+```python
+from auto_quant import AutoQuantForCausalLM, LMEvalAdaptor
+from transformers import AutoTokenizer
+from lm_eval import evaluator
+
+quant_path = "opt-125m-awq"
+
+model = AutoQuantForCausalLM.from_quantized(quant_path)
+tokenizer = AutoTokenizer.from_pretrained(quant_path, trust_remote_code=True)
+
+lm_eval_model = LMEvalAdaptor(model, tokenizer, batch_size=1)
+
+results = evaluator.simple_evaluate(model=lm_eval_model,tasks=['wikitext'],batch_size=1,no_cache=True,num_fewshot=0,)
+print(evaluator.make_table(results))
 ```
 
 ## Model Quantization
