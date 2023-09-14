@@ -9,9 +9,7 @@ Unlike [AutoGPTQ](https://github.com/PanQiWei/AutoGPTQ) and [AutoAWQ](https://gi
 ## Install
 ### Build source
 ```
-git clone https://github.com/qwopqwop200/AutoQuant
-cd AutoQuant
-pip install -e .
+pip install git+https://github.com/qwopqwop200/AutoQuant
 ```
 ## Usage
 Below, you will find examples of how to easily quantize a model and run inference.
