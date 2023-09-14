@@ -7,7 +7,6 @@ Unlike [AutoGPTQ](https://github.com/PanQiWei/AutoGPTQ) and [AutoAWQ](https://gi
 - [2023/09] Support GPTQ Quantization method
 
 ## Install
-### Build source
 ```
 pip install git+https://github.com/qwopqwop200/AutoQuant
 ```
