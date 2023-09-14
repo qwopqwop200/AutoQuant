@@ -5,3 +5,4 @@ from .opt import OPTAWQForCausalLM
 from .falcon import FalconAWQForCausalLM
 from .bloom import BloomAWQForCausalLM
 from .gptj import GPTJAWQForCausalLM
+from .auto import *

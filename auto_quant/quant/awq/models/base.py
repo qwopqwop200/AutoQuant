@@ -4,26 +4,25 @@ import functools
 from tqdm import tqdm
 from collections import defaultdict
 from dataclasses import dataclass, field, fields
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import torch
 import torch.nn as nn
+from torch import LongTensor
+from torch.nn.utils.rnn import pad_sequence
 
 from huggingface_hub import snapshot_download
 from transformers import AutoModelForCausalLM, AutoConfig
-from transformers.modeling_utils import SAFE_WEIGHTS_NAME
-from transformers.utils.hub import cached_file, create_repo, create_commit, CommitOperationAdd
-from accelerate import init_empty_weights, infer_auto_device_map, dispatch_model
+from transformers.modeling_utils import WEIGHTS_NAME, SAFE_WEIGHTS_NAME
+from accelerate import init_empty_weights, infer_auto_device_map, load_checkpoint_in_model
 from accelerate.utils import get_balanced_memory
-from accelerate.utils.modeling import load_checkpoint_in_model
 
-from auto_quant.models import BaseQuantConfig, BaseQuantForCausalLM
+from auto_quant.models.base import BaseQuantConfig, BaseQuantForCausalLM
 from auto_quant.modules.qlinear_exllama import ExllamaLinear, exllama_post_init, make_sure_no_tensor_in_meta_device
+from auto_quant.utils.module import append_str_prefix, get_op_name, get_named_module, set_op_by_name, simple_dispatch_model, get_device
 from ..quantize.quantizer import pseudo_quantize_tensor, ScaledActivation
 from ..quantize.auto_clip import auto_clip_block, apply_clip
 from ..quantize.auto_scale import auto_scale_block, apply_scale
-from .utils import append_str_prefix, get_op_name, get_named_linears, set_op_by_name, simple_dispatch_model
-    
 @dataclass
 class AWQConfig(BaseQuantConfig):
     bits: int = field(default=4, metadata={"choices": [4]})
@@ -51,6 +50,7 @@ class AWQConfig(BaseQuantConfig):
             "zero_point": self.zero_point,
             "auto_scale": self.auto_scale,
             "mse_range": self.mse_range,
+            "inplace": self.inplace,
             "quant_type": self.quant_type,
         }
 
@@ -109,8 +109,8 @@ class BaseAWQForCausalLM(BaseQuantForCausalLM):
         }
     
         if not os.path.isdir(quant_path):
-            quant_path = snapshot_download(quant_path,ignore_patterns=[ "*.msgpack" , "*.h5", "*.bin", "*.pt" ], **snapshot_cached_file_kwargs)
-
+            quant_path = snapshot_download(quant_path,ignore_patterns=[ "*.msgpack" , "*.h5"], **snapshot_cached_file_kwargs)
+            
         config = AutoConfig.from_pretrained(quant_path, trust_remote_code=trust_remote_code, **cached_file_kwargs)
         quant_config = AWQConfig.from_pretrained(quant_path, **cached_file_kwargs)
 
@@ -151,10 +151,10 @@ class BaseAWQForCausalLM(BaseQuantForCausalLM):
 
         if low_cpu_mem_usage:
             make_sure_no_tensor_in_meta_device(model)
-        
-        if os.path.isfile(os.path.join(quant_path, SAFE_WEIGHTS_NAME)):
+        if os.path.isfile(os.path.join(quant_path, WEIGHTS_NAME)):
+            quant_path = os.path.join(quant_path, WEIGHTS_NAME)
+        elif os.path.isfile(os.path.join(quant_path, SAFE_WEIGHTS_NAME)):
             quant_path = os.path.join(quant_path, SAFE_WEIGHTS_NAME)
-        
         load_checkpoint_in_model(
             model,
             checkpoint=quant_path,
@@ -163,7 +163,7 @@ class BaseAWQForCausalLM(BaseQuantForCausalLM):
             offload_buffers=True
         )
         model = simple_dispatch_model(model, device_map)
-        exllama_post_init(model, False)
+        model = exllama_post_init(model, False)
         return self(model, quant_config, is_quantized=True)
 
     def _load_quantized_modules(self, model, quant_config):
@@ -174,43 +174,54 @@ class BaseAWQForCausalLM(BaseQuantForCausalLM):
             layer = layers[i]
 
             # Get every linear layer in a block
-            named_linears = get_named_linears(layer)
+            named_linears = get_named_module(layer)
 
             # Replace activation functions
             self._scale_activations(self, layer)
 
             # Replace nn.Linear with ExllamaLinear
             for name, module in named_linears.items():
-                q_linear = ExllamaLinear.from_linear(module, quant_config.bits, quant_config.group_size, True)
-                q_linear.to(next(layer.parameters()).device)
+                q_linear = ExllamaLinear.from_linear(module, quant_config.bits, quant_config.group_size, False, True)
+                q_linear.to(get_device(layer))
                 set_op_by_name(layer, name, q_linear)
             torch.cuda.empty_cache()
             gc.collect()
             
-    def _prepare_examples_for_quantization(self, examples):
+    def _prepare_examples_for_quantization(self, examples: List[Union[List[int], torch.LongTensor]]):
+        pad_token_id = self.model.config.pad_token_id
+        if not pad_token_id:
+            pad_token_id = self.config.eos_token_id
+    
         if isinstance(examples,list):
-            examples = torch.cat(examples, dim=0)
+            new_examples = []
+            for tensor in examples:
+                if tensor.dim() > 2:
+                    raise Exception('examples must be 2D tensor or less.')
+                else:
+                    for i in range(tensor.dim(),2):
+                        tensor.squeeze(0)
+                        
+                for i in range(tensor.shape[0]):
+                    new_examples.append(tensor[i])
+            examples = pad_sequence(new_examples, True, padding_value=pad_token_id)
             
-        elif isinstance(data, torch.Tensor):
-            if examples != torch.long:
-                raise NotImplementedError('examples must be torch.int64(torch.long)')
-            if examples.dim() != 2:
-                raise NotImplementedError('examples must be 2D tensor')
+        if examples.dim() > 2:
+            raise Exception('examples must be 2D tensor or less.')
         else:
-            raise NotImplementedError('examples must be torch.Tensor or List[torch.Tensor].') #
+            for i in range(examples.dim(),2):
+                examples.squeeze(0)
         return examples
             
     @torch.no_grad()
-    def quantize(self, examples):
+    def quantize(self, examples: List[Union[List[int], torch.LongTensor]]):
         examples = self._prepare_examples_for_quantization(examples)
         self._awq_search(examples)
         self._awq_quant()
-        device_map = infer_auto_device_map(self.model, no_split_module_classes=[self.layer_type])
-        self.model = dispatch_model(self.model, device_map=device_map)
-        exllama_post_init(self.model, False)
+        self.model = exllama_post_init(self.model, False)
         self.is_quantized = True
         
     def _awq_search(self, examples):
+        device_map = self.hf_device_map
         layers = self.get_model_layers(self.model)
         inps = []
         layer_kwargs = {}
@@ -234,7 +245,7 @@ class BaseAWQForCausalLM(BaseQuantForCausalLM):
         # patch layer 0 to catch input and kwargs
         layers[0] = Catcher(layers[0])
         try:
-            self.model(examples.to(next(self.model.parameters()).device))
+            self.model(examples.to(get_device(self.model)))
         except ValueError:  # work with early exit
             pass
         del examples
@@ -252,7 +263,7 @@ class BaseAWQForCausalLM(BaseQuantForCausalLM):
         for i in tqdm(range(len(layers)), desc="AWQ Search"):
             layer = layers[i]
             layer = layer.cuda()
-            named_linears = get_named_linears(layer)
+            named_linears = get_named_module(layer)
 
             # firstly, get input features of all linear layers
             def cache_input_hook(m, x, y, name, feat_dict):
@@ -264,7 +275,7 @@ class BaseAWQForCausalLM(BaseQuantForCausalLM):
             handles = []
             for name in named_linears:
                 handles.append(named_linears[name].register_forward_hook(functools.partial(cache_input_hook, name=name,feat_dict=input_feat)))
-            inps = inps.to(next(layer.parameters()).device)  # in case multi-gpu
+            inps = inps.to(get_device(layer))  # in case multi-gpu
             # get output as next layer's input
             inps = layer(inps, **layer_kwargs)[0]
             for h in handles:
@@ -305,6 +316,8 @@ class BaseAWQForCausalLM(BaseQuantForCausalLM):
             torch.cuda.empty_cache()
         
         self.search_result = awq_results
+        if device_map:
+            self.model = simple_dispatch_model(self.model, device_map)
 
     def _awq_quant(self):
         layers = self.get_model_layers(self.model)
@@ -312,10 +325,11 @@ class BaseAWQForCausalLM(BaseQuantForCausalLM):
         # Run AWQ quantization
         for i in tqdm(range(len(layers)), desc="AWQ Quantization"):
             layer = layers[i]
-            named_linears = get_named_linears(layer)
+            named_linears = get_named_module(layer)
             self._scale_activations(self, layer)
 
             for name, module in named_linears.items():
+                device = get_device(module)
                 module.cuda()
                 
                 module.weight.data, scales, zeros = pseudo_quantize_tensor(
@@ -330,29 +344,27 @@ class BaseAWQForCausalLM(BaseQuantForCausalLM):
                     module, 
                     self.quant_config.bits, 
                     self.quant_config.group_size,
+                    False,
                     False, 
                     scales, 
                     zeros
                 )
 
                 module.cpu()
-                q_linear.to(next(layer.parameters()).device)
+                q_linear.to(device)
                 set_op_by_name(layer, name, q_linear)
                 torch.cuda.empty_cache()
                 gc.collect()
-                
-            torch.cuda.empty_cache()
-            gc.collect()
             
     @staticmethod
     def _scale_activations(self, layer):
         scale_dict = self.get_act_for_scaling(layer)
         if scale_dict['is_scalable']:
             if not isinstance(scale_dict['scale_layer'], ScaledActivation):
-                param = next(layer.parameters())
+                device = get_device(layer)
                 
                 # get activation scale
-                scale_like = torch.ones(scale_dict['scale_shape'], dtype=param.dtype, device=param.device)
+                scale_like = torch.ones(scale_dict['scale_shape'], dtype=param.dtype, device=device)
                 
                 # scale activation
                 scaled_act = ScaledActivation(scale_dict['scale_layer'], scale_like)

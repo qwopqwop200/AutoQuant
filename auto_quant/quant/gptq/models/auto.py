@@ -3,43 +3,54 @@ from typing import Dict, Optional, Union
 
 import torch
 from transformers import AutoConfig
-from auto_quant.quant.awq.models import *
+from auto_quant.quant.gptq.models import *
 
-AWQ_CAUSAL_LM_MODEL_MAP = {
-    "mpt": MptAWQForCausalLM,
-    "llama": LlamaAWQForCausalLM,
-    "opt": OPTAWQForCausalLM,
-    "RefinedWeb": FalconAWQForCausalLM,
-    "RefinedWebModel": FalconAWQForCausalLM,
-    "bloom": BloomAWQForCausalLM,
-    "gptj": GPTJAWQForCausalLM
+GPTQ_CAUSAL_LM_MODEL_MAP = {
+    "bloom": BloomGPTQForCausalLM,
+    "gpt_neox": GPTNeoXGPTQForCausalLM,
+    "gptj": GPTJGPTQForCausalLM,
+    "gpt2": GPT2GPTQForCausalLM,
+    "llama": LlamaGPTQForCausalLM,
+    "opt": OPTGPTQForCausalLM,
+    "moss": MOSSGPTQForCausalLM,
+    "gpt_bigcode": GPTBigCodeGPTQForCausalLM,
+    "codegen": CodeGenGPTQForCausalLM,
+    "RefinedWebModel": RWGPTQForCausalLM,
+    "RefinedWeb": RWGPTQForCausalLM,
+    "falcon": RWGPTQForCausalLM,
+    "baichuan": BaiChuanGPTQForCausalLM,
+    "internlm": InternLMGPTQForCausalLM,
+    "qwen": QwenGPTQForCausalLM,
 }
 
 def check_and_get_model_type(model_dir, trust_remote_code=True):
     config = AutoConfig.from_pretrained(model_dir, trust_remote_code=trust_remote_code)
-    if config.model_type not in AWQ_CAUSAL_LM_MODEL_MAP.keys():
-        raise TypeError(f"{config.model_type} isn't supported yet. Only support: {list(AWQ_CAUSAL_LM_MODEL_MAP.keys())}")
+    if config.model_type not in GPTQ_CAUSAL_LM_MODEL_MAP.keys():
+        raise TypeError(f"{config.model_type} isn't supported yet. Only support: {list(GPTQ_CAUSAL_LM_MODEL_MAP.keys())}")
     model_type = config.model_type
     return model_type
 
-class AutoAWQForCausalLM:
+class AutoGPTQForCausalLM:
     def __init__(self):
-        raise EnvironmentError('You must instantiate AutoAWQForCausalLM with\n'
-                               'AutoAWQForCausalLM.from_quantized or AutoAWQForCausalLM.from_pretrained')
-    
+        raise EnvironmentError(
+            "AutoGPTQModelForCausalLM is designed to be instantiated\n"
+            "using `AutoGPTQModelForCausalLM.from_pretrained` if want to quantize a pretrained model.\n"
+            "using `AutoGPTQModelForCausalLM.from_quantized` if want to inference with quantized model."
+        )
+
     @classmethod
     def from_pretrained(
         self, 
         model_path, 
-        quant_config: AWQConfig, 
+        quant_config: GPTQConfig, 
         max_memory: Optional[dict] = None,
         torch_dtype: torch.dtype = torch.float16,
         trust_remote_code=True,
         **kwargs
-    ) -> BaseAWQForCausalLM:
+    ) -> BaseGPTQForCausalLM:
         
         model_type = check_and_get_model_type(model_path, trust_remote_code)
-        return AWQ_CAUSAL_LM_MODEL_MAP[model_type].from_pretrained(
+        return GPTQ_CAUSAL_LM_MODEL_MAP[model_type].from_pretrained(
             model_path, 
             quant_config=quant_config,
             max_memory=max_memory,
@@ -47,7 +58,7 @@ class AutoAWQForCausalLM:
             trust_remote_code=trust_remote_code,
             **kwargs
         )
-        
+
     @classmethod
     def from_quantized(
         self, 
@@ -59,9 +70,9 @@ class AutoAWQForCausalLM:
         torch_dtype: torch.dtype = torch.float16, 
         trust_remote_code=True,
         **kwargs
-    ) -> BaseAWQForCausalLM:
+    ) -> BaseGPTQForCausalLM:
         model_type = check_and_get_model_type(quant_path, trust_remote_code)
-        quant_func = AWQ_CAUSAL_LM_MODEL_MAP[model_type].from_quantized
+        quant_func = GPTQ_CAUSAL_LM_MODEL_MAP[model_type].from_quantized
         # A static list of kwargs needed for huggingface_hub
         huggingface_kwargs = [
             "cache_dir",
