@@ -4,17 +4,18 @@ from pathlib import Path
 from setuptools import setup, find_packages
 from distutils.sysconfig import get_python_lib
 from torch.utils.cpp_extension import BuildExtension, CUDA_HOME, CUDAExtension
+from auto_quant import __version__
 
 os.environ["CC"] = "g++"
 os.environ["CXX"] = "g++"
 
 common_setup_kwargs = {
-    "version": "0.0.0",
+    "version": __version__,
     "name": "autoquant",
     "author": "qwopqwop",
     "license": "MIT",
     "python_requires": ">=3.8.0",
-    "description": "AutoQuant: An easy-to-use LLMs quantization package",
+    "description": "An easy-to-use LLMs quantization package",
     "long_description": (Path(__file__).parent / "README.md").read_text(encoding="UTF-8"),
     "long_description_content_type": "text/markdown",
     "url": "https://github.com/qwopqwop200/AutoQuant",
@@ -40,11 +41,6 @@ requirements = [
     "accelerate",
     "sentencepiece",
     "lm_eval",
-    "texttable",
-    "toml",
-    "attributedict",
-    "protobuf",
-    "torchvision"
 ]
 
 include_dirs = []

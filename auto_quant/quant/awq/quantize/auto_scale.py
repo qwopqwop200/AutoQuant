@@ -6,12 +6,8 @@ import logging
 from transformers.models.bloom.modeling_bloom import BloomGelu
 from transformers.models.llama.modeling_llama import LlamaRMSNorm
 from transformers.activations import NewGELUActivation
+from auto_quant.utils.module import get_op_by_name, get_op_name, set_op_by_name
 from .quantizer import ScaledActivation
-from ..models.utils import get_op_by_name, get_op_name, set_op_by_name
-
-__all__ = ["auto_scale_block", "apply_scale"]
-
-
 @torch.no_grad()
 def get_weight_scale(weight, group_size=-1):
     org_shape = weight.shape

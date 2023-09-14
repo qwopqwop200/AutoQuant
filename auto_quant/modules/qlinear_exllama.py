@@ -1,5 +1,6 @@
 import gc
 import math
+import logging
 from typing import Optional
 import torch
 import torch.nn as nn
@@ -27,7 +28,7 @@ def ext_q4_matmul(x, q4, q4_width):
     return output.view(outshape)
 
 class ExllamaLinear(nn.Module):
-    def __init__(self, bits, group_size, in_features, out_features, bias, device):
+    def __init__(self, bits, group_size, in_features, out_features, bias, act_order=False, device='cpu'):
         super().__init__()
         if bits not in [4]:
             raise NotImplementedError("Only 4-bit are supported for now.")
@@ -47,22 +48,27 @@ class ExllamaLinear(nn.Module):
             self.register_buffer('bias', torch.zeros((out_features), dtype=torch.float16, device=device))
         else:
             self.bias = None
-            
+        if act_order:
+            self.register_buffer('g_idx',torch.tensor([i // self.group_size for i in range(in_features)], dtype=torch.int32))
+        else:
+            self.g_idx = None
+        self.is_post_init = False
+        
     def post_init(self):
         assert self.qweight.device.type == "cuda"
         assert self.qweight.device.index is not None
-
         self.q4 = ext_make_q4(
             self.qweight,
             self.qzeros,
             self.scales,
-            None,
+            self.g_idx.to("cpu") if self.g_idx is not None else None,
             self.qweight.device.index # device index
         )
+        self.is_post_init = True
         
     @classmethod
-    def from_linear(cls, linear, bits, group_size, init_only=False, scales=None, zeros=None):
-        awq_linear = cls(bits, group_size, linear.in_features, linear.out_features, linear.bias is not None, linear.weight.device)
+    def from_linear(self, linear, bits, group_size, act_order=False, init_only=False, scales=None, zeros=None, g_idx=None):
+        awq_linear = self(bits, group_size, linear.in_features, linear.out_features, linear.bias is not None, act_order, linear.weight.device)
         if init_only:  # just prepare for loading sd
             return awq_linear
         
@@ -70,17 +76,21 @@ class ExllamaLinear(nn.Module):
         assert scales is not None and zeros is not None
         scales = scales.t().contiguous()
         zeros = zeros.t().contiguous()
-        scale_zeros = zeros * scales
         
         awq_linear.scales = scales.clone().half()
-        if linear.bias is not None:
-            awq_linear.bias = linear.bias.clone().half()
-
+        awq_linear.bias = linear.bias.clone().half()
+        awq_linear.g_idx = g_idx.clone() if act_order else None
+        
+        scale_zeros = zeros * scales
         pack_num = 32 // awq_linear.bits
         
         intweight = []
         for idx in range(awq_linear.in_features):
-            intweight.append(torch.round((linear.weight.data[:, idx] + scale_zeros[idx // group_size]) / awq_linear.scales[idx // group_size]).to(torch.int)[:, None])
+            if act_order:
+                intweight.append(torch.round((linear.weight.data[:, idx] + scale_zeros[g_idx[idx]]) / awq_linear.scales[g_idx[idx]]).to(torch.int)[:, None])
+            else:
+                intweight.append(torch.round((linear.weight.data[:, idx] + scale_zeros[idx // group_size]) / awq_linear.scales[idx // group_size]).to(torch.int)[:, None])
+                
         intweight = torch.cat(intweight, dim=1)
         intweight = intweight.t().contiguous()
         intweight = intweight.to(dtype=torch.int32)
@@ -101,6 +111,8 @@ class ExllamaLinear(nn.Module):
         
     @torch.no_grad()
     def forward(self, x):
+        if not self.is_post_init:
+            raise EnvironmentError('Exllama has not been post-initialized.')
         out = ext_q4_matmul(x.half(), self.q4, self.out_features)
         out = out + self.bias if self.bias is not None else out
         return out
@@ -110,75 +122,85 @@ class ExllamaLinear(nn.Module):
             self.in_features, self.out_features, self.bias is not None, self.bits, self.group_size
         )
         
-def exllama_post_init(model, use_act_order: bool, max_input_length: Optional[int] = None):
+def check_exllama_can_save(model):
+    for name, submodule in model.named_modules():
+        if isinstance(submodule, ExllamaLinear):
+            if submodule.is_post_init and submodule.g_idx is not None:
+                return False
+    return True
+        
+def check_exllama_device(model):
+    for name, submodule in model.named_modules():
+        if isinstance(submodule, ExllamaLinear) and submodule.qweight.device.type != "cuda":
+                return False
+    return True
+    
+def post_init(model, use_act_order: bool, max_input_length: Optional[int] = None):
     """
     The max_input_length argument is specific to the exllama backend, that requires to initialize a buffer temp_state.
     """
     device_to_buffers_size = {}
+    for name, submodule in model.named_modules():
+        if isinstance(submodule, ExllamaLinear):
+            device = submodule.qweight.device
+            if device not in device_to_buffers_size:
+                device_to_buffers_size[device] = {"max_dq_buffer_size": 1,"max_inner_outer_dim": 1}
 
+            device_to_buffers_size[device]["max_dq_buffer_size"] = max(device_to_buffers_size[device]["max_dq_buffer_size"], submodule.qweight.numel() * 8)
+            if use_act_order:
+                device_to_buffers_size[device]["max_inner_outer_dim"] = max(device_to_buffers_size[device]["max_inner_outer_dim"], submodule.in_features, submodule.out_features)
+    device_to_buffers = {}
+
+    if use_act_order:
+        if max_input_length is None:
+            max_input_len = EXLLAMA_DEFAULT_MAX_INPUT_LENGTH
+        else:
+            max_input_len = max_input_length
+    else:
+        if max_input_length is not None:
+            logging.info("Using exllama backend without act-order, the parameter max_input_length was set although not needed, it will be ignored.")
+        max_input_len = 1
+
+    for device, buffers_size in device_to_buffers_size.items():
+        # The temp_state buffer is required to reorder X in the act-order case.
+        # The temp_dq buffer is required to dequantize weights when using cuBLAS, typically for the prefill.
+        device_to_buffers[device] = {
+            "temp_state": torch.zeros((max_input_len, buffers_size["max_inner_outer_dim"]), dtype=torch.float16, device=device),
+            "temp_dq": torch.zeros((1, buffers_size["max_dq_buffer_size"]), dtype=torch.float16, device=device),
+            "max_dq_buffer_size": buffers_size["max_dq_buffer_size"],
+            "max_inner_outer_dim": buffers_size["max_inner_outer_dim"],
+        }
+
+    # Buffers need to be persistent to avoid any bug.
+    model.device_to_buffers = device_to_buffers
+    
+    for device, buffers in model.device_to_buffers.items():
+        prepare_buffers(device, buffers["temp_state"], buffers["temp_dq"])
+
+    # Using the default from exllama repo here.
+    matmul_recons_thd = 8
+    matmul_fused_remap = False
+    matmul_no_half2 = False
+    set_tuning_params(matmul_recons_thd, matmul_fused_remap, matmul_no_half2)
+
+    # The buffers need to have been initialized first before calling make_q4.
+    for name, submodule in model.named_modules():
+        if isinstance(submodule, ExllamaLinear):
+            submodule.post_init()
+
+    torch.cuda.empty_cache()
+    return model
+    
+def exllama_post_init(model, use_act_order: bool, max_input_length: Optional[int] = None):
     model_uses_exllama = False
     for name, submodule in model.named_modules():
         if isinstance(submodule, ExllamaLinear):
             model_uses_exllama = True
-            device = submodule.qweight.device
-            if device not in device_to_buffers_size:
-                device_to_buffers_size[device] = {
-                    "max_dq_buffer_size": 1,
-                    "max_inner_outer_dim": 1
-                }
-            
-            if not use_act_order:
-                submodule._use_act_order = False
-            else:
-                submodule._use_act_order = True
-
-            device_to_buffers_size[device]["max_dq_buffer_size"] = max(device_to_buffers_size[device]["max_dq_buffer_size"], submodule.qweight.numel() * 8)
-
-            if use_act_order:
-                device_to_buffers_size[device]["max_inner_outer_dim"] = max(device_to_buffers_size[device]["max_inner_outer_dim"], submodule.infeatures, submodule.outfeatures)
-
     if model_uses_exllama:
-        device_to_buffers = {}
-
-        if use_act_order:
-            if max_input_length is None:
-                max_input_len = EXLLAMA_DEFAULT_MAX_INPUT_LENGTH
-            else:
-                max_input_len = max_input_length
+        if check_exllama_device(model):
+            post_init(model, use_act_order, max_input_length)
         else:
-            if max_input_length is not None:
-                logger.info("Using exllama backend without act-order, the parameter max_input_length was set although not needed, it will be ignored.")
-            max_input_len = 1
-
-        for device, buffers_size in device_to_buffers_size.items():
-            # The temp_state buffer is required to reorder X in the act-order case.
-            # The temp_dq buffer is required to dequantize weights when using cuBLAS, typically for the prefill.
-            device_to_buffers[device] = {
-                "temp_state": torch.zeros((max_input_len, buffers_size["max_inner_outer_dim"]), dtype=torch.float16, device=device),
-                "temp_dq": torch.zeros((1, buffers_size["max_dq_buffer_size"]), dtype=torch.float16, device=device),
-                "max_dq_buffer_size": buffers_size["max_dq_buffer_size"],
-                "max_inner_outer_dim": buffers_size["max_inner_outer_dim"],
-            }
-        
-        # Buffers need to be persistent to avoid any bug.
-        model.device_to_buffers = device_to_buffers
-    
-        for device, buffers in model.device_to_buffers.items():
-            prepare_buffers(device, buffers["temp_state"], buffers["temp_dq"])
-
-        # Using the default from exllama repo here.
-        matmul_recons_thd = 8
-        matmul_fused_remap = False
-        matmul_no_half2 = False
-        set_tuning_params(matmul_recons_thd, matmul_fused_remap, matmul_no_half2)
-
-        # The buffers need to have been initialized first before calling make_q4.
-        for name, submodule in model.named_modules():
-            if isinstance(submodule, ExllamaLinear):
-                submodule.post_init()
-
-        torch.cuda.empty_cache()
-    
+            logging.warning("ExLlama cannot be initialized. ExLlama's device only accepts cuda.")
     return model
         
 def exllama_set_max_input_length(model, max_input_length: int):
@@ -188,7 +210,7 @@ def exllama_set_max_input_length(model, max_input_length: int):
     When using the exllama backend with act-order, it is necessary to initialize a buffer that depends on the maximum expected input length. In case the
     default used (EXLLAMA_DEFAULT_MAX_INPUT_LENGTH) is too short, this method can be called to extend the buffer size without reloading the whole model.
     """
-    if not model.quantize_config.desc_act:
+    if not model.quant_config.act_order:
         raise ValueError("The method exllama_set_max_input_length should be called only when using the exllama backend **with act-order**.")
     
     device_to_buffers_size = {}
@@ -226,4 +248,4 @@ def exllama_set_max_input_length(model, max_input_length: int):
 def make_sure_no_tensor_in_meta_device(model):
     for n, m in model.named_modules():
         if isinstance(submodule, ExllamaLinear) and m.bias.device == torch.device("meta"):
-            m.register_buffer('bias', torch.zeros((m.outfeatures), dtype=torch.float16, device="cpu"))
+            m.register_buffer('bias', torch.zeros((m.out_features), dtype=torch.float16, device="cpu"))

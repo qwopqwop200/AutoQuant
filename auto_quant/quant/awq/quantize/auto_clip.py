@@ -3,8 +3,6 @@ import torch.nn as nn
 from .quantizer import pseudo_quantize_tensor
 import gc
 
-__all__ = ["auto_clip_block"]
-
 # weight quantization
 @torch.no_grad()
 def auto_clip_layer(w, 
@@ -86,7 +84,7 @@ def auto_clip_block(module,
 
 @torch.no_grad()
 def apply_clip(module, clip_list):
-    from ..models.utils import get_op_by_name
+    from auto_quant.utils.module import get_op_by_name
     for name, max_val in clip_list:
         layer = get_op_by_name(module, name)
         layer.cuda()

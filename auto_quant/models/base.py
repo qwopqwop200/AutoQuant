@@ -11,10 +11,11 @@ from safetensors.torch import save_file as safe_save
 from transformers import AutoModelForCausalLM, AutoConfig, PreTrainedModel
 from transformers.generation import GenerationMixin
 from transformers.utils.hub import PushToHubMixin, cached_file, create_repo, create_commit, CommitOperationAdd
-from transformers.modeling_utils import shard_checkpoint, SAFE_WEIGHTS_NAME, SAFE_WEIGHTS_INDEX_NAME
+from transformers.modeling_utils import shard_checkpoint, WEIGHTS_NAME, WEIGHTS_INDEX_NAME, SAFE_WEIGHTS_NAME, SAFE_WEIGHTS_INDEX_NAME
 from accelerate import init_empty_weights, infer_auto_device_map
 
 from auto_quant import __version__
+from auto_quant.modules.qlinear_exllama import check_exllama_can_save
 
 class BaseQuantConfig(PushToHubMixin):
     quant_path: Optional[str] = None
@@ -25,7 +26,7 @@ class BaseQuantConfig(PushToHubMixin):
             json.dump(self.to_dict(), f, indent=2)
 
     @classmethod
-    def from_pretrained(cls, save_dir: str, **kwargs):
+    def from_pretrained(self, save_dir: str, **kwargs):
         # Parameters related to loading from Hugging Face Hub
         cache_dir = kwargs.pop("cache_dir", None)
         force_download = kwargs.pop("force_download", False)
@@ -57,22 +58,26 @@ class BaseQuantConfig(PushToHubMixin):
                 _commit_hash=commit_hash,
             )
         
-        field_names = [field.name for field in fields(cls)]
+        field_names = [field.name for field in fields(self)]
         with open(resolved_config_file, "r", encoding="utf-8") as f:
             args_from_json = json.load(f)
+            if args_from_json['quant_type'] != self.quant_type:
+                raise ValueError(f"Expected quant type: {self.quant_type}, quant type in config: {args_from_json['quant_type']}")
+            
             filtered_args = {}
             for key, val in args_from_json.items():
                 if key in field_names:
                     filtered_args[key] = val
                 else:
-                    if key not in ['quant_type','quant_path']:
+                    if key not in ['quant_type']:
                         logging.warning(f"ignoring unknown parameter in {quant_config_filename}: {key}.")
-            return cls(**filtered_args)
+            return self(**filtered_args)
             
 class BaseQuantForCausalLM(nn.Module, PushToHubMixin, GenerationMixin):
     def __init__(self, model, quant_config, is_quantized):
         super().__init__()
         self.model:PreTrainedModel = model
+        self.config = self.model.config
         self.model_type:str = self.model.config.model_type
         self.is_quantized:bool = is_quantized
         if not isinstance(quant_config, BaseQuantConfig):
@@ -108,24 +113,30 @@ class BaseQuantForCausalLM(nn.Module, PushToHubMixin, GenerationMixin):
     def get_input_embeddings(self, *args, **kwargs):
         return self.model.get_input_embeddings(*args, **kwargs)
             
-    def save_pretrained(self, save_dir: str, max_shard_size: Union[int, str] = "10GB"):
+    def save_pretrained(self, save_dir: str, max_shard_size: Union[int, str] = "10GB", use_safetensors: bool = False):
         """alias of save_quantized"""
         logging.warning("you are using save_pretrained, which will re-direct to save_quantized.")
         self.save_quantized(save_dir, max_shard_size)
 
-    def save_quantized(self, save_dir: str, max_shard_size: Union[int, str] = "10GB"):    
+    def save_quantized(self, save_dir: str, max_shard_size: Union[int, str] = "10GB", use_safetensors: bool = False):    
+        if not self.is_quantized:
+            raise EnvironmentError("can only save quantized model, please execute .quantize first.")
+        if not check_exllama_can_save(self.model):
+            raise EnvironmentError("desc_act is enabled and Exllama is post-initialized. The model cannot be saved.")
+        
         os.makedirs(save_dir, exist_ok=True)        
-        self.model.to('cpu')
         
         state_dict = self.model.state_dict()
-        state_dict = {k: v.clone().contiguous() for k, v in state_dict.items()}
-        shards, index = shard_checkpoint(state_dict, max_shard_size, weights_name=SAFE_WEIGHTS_NAME)
+        state_dict = {k: v.to('cpu') for k, v in state_dict.items()}
+        shards, index = shard_checkpoint(state_dict, max_shard_size, weights_name=SAFE_WEIGHTS_NAME if use_safetensors else WEIGHTS_NAME)
         
         for shard_file, shard in shards.items():
-            safe_save(shard, os.path.join(save_dir, shard_file), {'format': "pt", 'auto_quant_version': str(__version__)})
-            
+            if use_safetensors:
+                safe_save(shard, os.path.join(save_dir, shard_file), {'format': "pt", 'auto_quant_version': str(__version__)})
+            else:
+                torch.save(shard, os.path.join(save_dir, shard_file))
         if index is not None:
-            save_index_file = os.path.join(save_dir, SAFE_WEIGHTS_INDEX_NAME)
+            save_index_file = os.path.join(save_dir, SAFE_WEIGHTS_INDEX_NAME if use_safetensors else WEIGHTS_INDEX_NAME)
             # Save the index as well
             with open(save_index_file, "w", encoding="utf-8") as f:
                 content = json.dumps(index, indent=2, sort_keys=True) + "\n"
@@ -145,6 +156,10 @@ class BaseQuantForCausalLM(nn.Module, PushToHubMixin, GenerationMixin):
         trust_remote_code=True,
         **model_init_kwargs,
     ):  
+        from .auto import AutoQuantConfig
+        if isinstance(quant_config, AutoQuantConfig):
+            quant_config = quant_config.quant_config
+        
         self.check_quant_config(quant_config)
         # Parameters related to loading from Hugging Face Hub
         cache_dir = model_init_kwargs.pop("cache_dir", None)
@@ -181,19 +196,19 @@ class BaseQuantForCausalLM(nn.Module, PushToHubMixin, GenerationMixin):
             max_memory = get_balanced_memory(
                 model,
                 max_memory=max_memory,
-                no_split_module_classes=[cls.layer_type],
+                no_split_module_classes=[self.layer_type],
                 low_zero=False
             )
             model_init_kwargs["device_map"] = infer_auto_device_map(
                 model,
                 max_memory=max_memory,
-                no_split_module_classes=[cls.layer_type],
+                no_split_module_classes=[self.layer_type],
             )
             model_init_kwargs["low_cpu_mem_usage"] = True
             del model
         else:
-            model_init_kwargs["device_map"] = None
-            model_init_kwargs["low_cpu_mem_usage"] = False
+            model_init_kwargs["device_map"] = 'auto'
+            model_init_kwargs["low_cpu_mem_usage"] = True
         torch.cuda.empty_cache()
         merged_kwargs = {**model_init_kwargs, **cached_file_kwargs}
         model = AutoModelForCausalLM.from_pretrained(model_path, **merged_kwargs)
@@ -205,6 +220,7 @@ class BaseQuantForCausalLM(nn.Module, PushToHubMixin, GenerationMixin):
         repo_id: str,
         save_dir: Optional[str] = None,
         max_shard_size: Union[int, str] = "10GB",
+        use_safetensors: bool = False,
         commit_message: Optional[str] = "Upload of AutoQuant quantized model",
         use_auth_token: Optional[Union[bool, str]] = None,
         private: Optional[bool] = None,
@@ -265,7 +281,7 @@ class BaseQuantForCausalLM(nn.Module, PushToHubMixin, GenerationMixin):
                 create_pr=create_pr,
                 repo_type="model",
             )
-            
+        
     def __getattr__(self, item):
         try:
             return super().__getattr__(item)
