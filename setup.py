@@ -4,14 +4,13 @@ from pathlib import Path
 from setuptools import setup, find_packages
 from distutils.sysconfig import get_python_lib
 from torch.utils.cpp_extension import BuildExtension, CUDA_HOME, CUDAExtension
-from auto_quant import __version__
 
 os.environ["CC"] = "g++"
 os.environ["CXX"] = "g++"
 
 common_setup_kwargs = {
-    "version": __version__,
-    "name": "autoquant",
+    "version": "0.0.1",
+    "name": "auto_quant",
     "author": "qwopqwop",
     "license": "MIT",
     "python_requires": ">=3.8.0",
