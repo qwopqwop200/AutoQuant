@@ -1,6 +1,7 @@
 import os
 import gc
 import functools
+import logging
 from tqdm import tqdm
 from collections import defaultdict
 from dataclasses import dataclass, field, fields
@@ -217,7 +218,7 @@ class BaseAWQForCausalLM(BaseQuantForCausalLM):
         examples = self._prepare_examples_for_quantization(examples)
         self._awq_search(examples)
         self._awq_quant()
-        self.model = exllama_post_init(self.model, False)
+        logging.warning("Exllama has not been post-initialized. inference doesn't work. Please save the model and then load it.")
         self.is_quantized = True
         
     def _awq_search(self, examples):

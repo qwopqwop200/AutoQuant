@@ -127,7 +127,7 @@ class BaseQuantForCausalLM(nn.Module, PushToHubMixin, GenerationMixin):
         os.makedirs(save_dir, exist_ok=True)        
         
         state_dict = self.model.state_dict()
-        state_dict = {k: v.to('cpu') for k, v in state_dict.items()}
+        state_dict = {k: v.to('cpu').clone().contiguous() for k, v in state_dict.items()}
         shards, index = shard_checkpoint(state_dict, max_shard_size, weights_name=SAFE_WEIGHTS_NAME if use_safetensors else WEIGHTS_NAME)
         
         for shard_file, shard in shards.items():

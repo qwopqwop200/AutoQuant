@@ -178,7 +178,7 @@ class BaseGPTQForCausalLM(BaseQuantForCausalLM):
             if not check_exllama_can_save(model):
                 logging.warning("The model cannot be saved again. If you want to save the model again, set post_init=False. But in this case, inference doesn't work.")
         else:
-                logging.warning("Exllama has not been post-initialized., inference doesn't work.")
+            logging.warning("Exllama has not been post-initialized. inference doesn't work. Please save the model and then load it.")
         return self(model, quant_config, is_quantized=True)
         
     def _load_quantized_modules(self, model, quant_config):
@@ -464,7 +464,4 @@ class BaseGPTQForCausalLM(BaseQuantForCausalLM):
             set_op_by_name(self.model, name, qlayer)
             torch.cuda.empty_cache()
             gc.collect()
-        if self.quant_config.act_order:
-            logging.warning('act_order is enabled. exllama post-initialization is not performed to save the model. To inference the model, save the model and load the model again.')
-        else:
-            self.model = exllama_post_init(self.model, self.quant_config.act_order)
+        logging.warning("Exllama has not been post-initialized. inference doesn't work. Please save the model and then load it.")
