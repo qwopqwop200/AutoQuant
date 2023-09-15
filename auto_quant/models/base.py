@@ -153,7 +153,7 @@ class BaseQuantForCausalLM(nn.Module, PushToHubMixin, GenerationMixin):
         quant_config, 
         max_memory: Optional[dict] = None,
         torch_dtype: torch.dtype = torch.float16, 
-        trust_remote_code=True,
+        trust_remote_code: bool = False,
         **model_init_kwargs,
     ):  
         from .auto import AutoQuantConfig
@@ -207,8 +207,8 @@ class BaseQuantForCausalLM(nn.Module, PushToHubMixin, GenerationMixin):
             model_init_kwargs["low_cpu_mem_usage"] = True
             del model
         else:
-            model_init_kwargs["device_map"] = 'auto'
-            model_init_kwargs["low_cpu_mem_usage"] = True
+            model_init_kwargs["device_map"] = None
+            model_init_kwargs["low_cpu_mem_usage"] = False
         torch.cuda.empty_cache()
         merged_kwargs = {**model_init_kwargs, **cached_file_kwargs}
         model = AutoModelForCausalLM.from_pretrained(model_path, **merged_kwargs)

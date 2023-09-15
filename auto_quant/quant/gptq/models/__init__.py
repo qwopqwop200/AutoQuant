@@ -12,4 +12,5 @@ from .gpt_bigcode import GPTBigCodeGPTQForCausalLM
 from .baichuan import BaiChuanGPTQForCausalLM
 from .internlm import InternLMGPTQForCausalLM
 from .qwen import QwenGPTQForCausalLM
+from .mpt import MptGPTQForCausalLM
 from .auto import *

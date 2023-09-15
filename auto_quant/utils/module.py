@@ -8,10 +8,10 @@ from accelerate import cpu_offload_with_hook
 from accelerate.hooks import add_hook_to_module, AlignDevicesHook
 from accelerate.utils.modeling import find_tied_parameters, retie_parameters
 
-def get_device(obj: Union[torch.Tensor, nn.Module]):
+def get_device(obj):
     if isinstance(obj, torch.Tensor):
-        return obj.device
-    return next(obj.parameters()).device
+        return obj.device.__str__()
+    return next(obj.parameters()).device.__str__()
 
 def move_to_device(obj: Union[torch.Tensor, nn.Module], device: torch.device):
     if get_device(obj) != device:

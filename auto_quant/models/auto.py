@@ -88,7 +88,7 @@ class AutoQuantForCausalLM:
         quant_config, 
         max_memory: Optional[dict] = None,
         torch_dtype: torch.dtype = torch.float16,
-        trust_remote_code=True,
+        trust_remote_code: bool = False,
         **kwargs
     ) -> BaseQuantForCausalLM:
         if isinstance(quant_config, AutoQuantConfig):
@@ -112,7 +112,7 @@ class AutoQuantForCausalLM:
         max_memory: Optional[dict] = None,
         low_cpu_mem_usage: bool = False,
         torch_dtype: torch.dtype = torch.float16, 
-        trust_remote_code=True,
+        trust_remote_code: bool = False,
         **kwargs
     ) -> BaseQuantForCausalLM:
         quant_type = AutoQuantConfig.from_pretrained(quant_path).quant_type

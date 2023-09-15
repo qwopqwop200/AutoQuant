@@ -73,7 +73,7 @@ class BaseAWQForCausalLM(BaseQuantForCausalLM):
         max_memory: Optional[dict] = None,
         low_cpu_mem_usage: bool = False,
         torch_dtype: torch.dtype = torch.float16, 
-        trust_remote_code=True,
+        trust_remote_code: bool = False,
         **kwargs,
     ):
         cache_dir = kwargs.pop("cache_dir", None)
@@ -261,8 +261,7 @@ class BaseAWQForCausalLM(BaseQuantForCausalLM):
 
         # Run AWQ search layer by layer
         for i in tqdm(range(len(layers)), desc="AWQ Search"):
-            layer = layers[i]
-            layer = layer.cuda()
+            layer = layers[i].cuda()
             named_linears = get_named_module(layer)
 
             # firstly, get input features of all linear layers
