@@ -1,4 +1,4 @@
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 from .models import AutoQuantForCausalLM, AutoQuantConfig
 from .quant.awq.models import AutoAWQForCausalLM, AWQConfig, BaseAWQForCausalLM
 from .quant.gptq.models import AutoGPTQForCausalLM, GPTQConfig, BaseGPTQForCausalLM
