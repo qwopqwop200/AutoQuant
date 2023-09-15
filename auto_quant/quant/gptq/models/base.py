@@ -14,7 +14,7 @@ from torch.nn.utils.rnn import pad_sequence
 from huggingface_hub import snapshot_download
 from transformers.modeling_utils import WEIGHTS_NAME, SAFE_WEIGHTS_NAME
 from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel
-from accelerate import init_empty_weights, infer_auto_device_map, dispatch_model, load_checkpoint_in_model
+from accelerate import init_empty_weights, infer_auto_device_map, dispatch_model, load_checkpoint_in_model, cpu_offload_with_hook
 from accelerate.utils import get_balanced_memory
 from accelerate.hooks import remove_hook_from_module
 
@@ -81,8 +81,8 @@ class BaseGPTQForCausalLM(BaseQuantForCausalLM):
         max_memory: Optional[dict] = None,
         low_cpu_mem_usage: bool = False,
         torch_dtype: torch.dtype = torch.float16, 
-        trust_remote_code=True,
-        post_init=True,
+        trust_remote_code: bool = False,
+        post_init: bool = True,
         **kwargs,
     ):
         cache_dir = kwargs.pop("cache_dir", None)
@@ -209,10 +209,11 @@ class BaseGPTQForCausalLM(BaseQuantForCausalLM):
     def _resize_position_ids(position_ids: List[torch.LongTensor]):
         return position_ids
 
-    def _prepare_examples_for_quantization(self, examples: List[Union[List[int], torch.LongTensor]], batch_size: int = 1):
-        pad_token_id = self.model.config.pad_token_id
-        if not pad_token_id:
-            pad_token_id = self.config.eos_token_id
+    def _prepare_examples_for_quantization(self, examples: List[Union[List[int], torch.LongTensor]], batch_size: int = 1, pad_token_id: Optional[int] = None):
+        if pad_token_id is None:
+            pad_token_id = self.model.config.pad_token_id
+            if not pad_token_id:
+                pad_token_id = self.config.eos_token_id
     
         if isinstance(examples,list):
             new_examples = []
@@ -225,8 +226,11 @@ class BaseGPTQForCausalLM(BaseQuantForCausalLM):
                         
                 for i in range(tensor.shape[0]):
                     new_examples.append(tensor[i])
-            examples = pad_sequence(new_examples, True, padding_value=pad_token_id)
-            
+            if pad_token_id is not None:
+                examples = pad_sequence(new_examples, True, padding_value=pad_token_id)
+            else:
+                examples = torch.cat(new_examples,dim=0)
+                
         if examples.dim() > 2:
             raise Exception('examples must be 2D tensor or less.')
         else:
@@ -243,8 +247,9 @@ class BaseGPTQForCausalLM(BaseQuantForCausalLM):
     def quantize(
         self,
         examples: List[Union[List[int], torch.LongTensor]],
+        pad_token_id: Optional[int] = None,
         batch_size: int = 1,
-        cache_examples_on_gpu: bool = True
+        cache_examples_on_gpu: bool = True,
     ):
         device_map = self.hf_device_map
         if device_map:
@@ -253,7 +258,7 @@ class BaseGPTQForCausalLM(BaseQuantForCausalLM):
                     logging.info(f"truly offloading {name} to cpu with hook.")
                     module = get_module_by_name_suffix(self.model, name)
                     remove_hook_from_module(module, recurse=True)
-                    accelerate.cpu_offload_with_hook(module, 'cuda:0')
+                    cpu_offload_with_hook(module, 'cuda:0')
 
         layer_inputs = []
         attention_masks = []
@@ -261,7 +266,7 @@ class BaseGPTQForCausalLM(BaseQuantForCausalLM):
         layer_input_kwargs = []
         layer_outputs = []
 
-        examples = self._prepare_examples_for_quantization(examples, batch_size)
+        examples = self._prepare_examples_for_quantization(examples, batch_size, pad_token_id)
 
         class LayerHijacker(nn.Module):
             """hijack layer's forward pass to cache data"""

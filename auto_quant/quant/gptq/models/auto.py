@@ -21,6 +21,7 @@ GPTQ_CAUSAL_LM_MODEL_MAP = {
     "baichuan": BaiChuanGPTQForCausalLM,
     "internlm": InternLMGPTQForCausalLM,
     "qwen": QwenGPTQForCausalLM,
+    "mpt": MptGPTQForCausalLM,
 }
 
 def check_and_get_model_type(model_dir, trust_remote_code=True):
@@ -45,7 +46,7 @@ class AutoGPTQForCausalLM:
         quant_config: GPTQConfig, 
         max_memory: Optional[dict] = None,
         torch_dtype: torch.dtype = torch.float16,
-        trust_remote_code=True,
+        trust_remote_code: bool = False,
         **kwargs
     ) -> BaseGPTQForCausalLM:
         
@@ -68,7 +69,7 @@ class AutoGPTQForCausalLM:
         max_memory: Optional[dict] = None,
         low_cpu_mem_usage: bool = False,
         torch_dtype: torch.dtype = torch.float16, 
-        trust_remote_code=True,
+        trust_remote_code: bool = False,
         **kwargs
     ) -> BaseGPTQForCausalLM:
         model_type = check_and_get_model_type(quant_path, trust_remote_code)

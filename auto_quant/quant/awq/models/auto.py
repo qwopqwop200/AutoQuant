@@ -34,7 +34,7 @@ class AutoAWQForCausalLM:
         quant_config: AWQConfig, 
         max_memory: Optional[dict] = None,
         torch_dtype: torch.dtype = torch.float16,
-        trust_remote_code=True,
+        trust_remote_code: bool = False,
         **kwargs
     ) -> BaseAWQForCausalLM:
         
@@ -57,7 +57,7 @@ class AutoAWQForCausalLM:
         max_memory: Optional[dict] = None,
         low_cpu_mem_usage: bool = False,
         torch_dtype: torch.dtype = torch.float16, 
-        trust_remote_code=True,
+        trust_remote_code: bool = False,
         **kwargs
     ) -> BaseAWQForCausalLM:
         model_type = check_and_get_model_type(quant_path, trust_remote_code)
