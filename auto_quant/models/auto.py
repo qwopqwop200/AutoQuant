@@ -10,17 +10,20 @@ from .base import BaseQuantConfig, BaseQuantForCausalLM
 from auto_quant.quant.rtn.models import AutoRTNForCausalLM, RTNConfig
 from auto_quant.quant.awq.models import AutoAWQForCausalLM, AWQConfig
 from auto_quant.quant.gptq.models import AutoGPTQForCausalLM, GPTQConfig
+from auto_quant.quant.quip.models import AutoQuIPForCausalLM, QuIPConfig
 
 QUANT_CONFIG_MAP = {
     "RTN": RTNConfig,
     "AWQ": AWQConfig,
     "GPTQ": GPTQConfig,
+    "QuIP": QuIPConfig,
 }
 
 QUANT_CAUSAL_LM_MODEL_MAP = {
     "RTN": AutoRTNForCausalLM,
     "AWQ": AutoAWQForCausalLM,
     "GPTQ": AutoGPTQForCausalLM,
+    "QuIP": AutoQuIPForCausalLM,
 }
 
 def check_quant_type(quant_type):

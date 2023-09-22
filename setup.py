@@ -9,7 +9,7 @@ os.environ["CC"] = "g++"
 os.environ["CXX"] = "g++"
 
 common_setup_kwargs = {
-    "version": "0.0.3",
+    "version": "0.0.4",
     "name": "auto_quant",
     "author": "qwopqwop",
     "license": "MIT",
@@ -40,6 +40,7 @@ requirements = [
     "accelerate",
     "sentencepiece",
     "lm_eval",
+    "primefac",
 ]
 
 include_dirs = []
