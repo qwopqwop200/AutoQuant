@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 from functools import partial
-import sys
 
 def check_nbits(wr, nbits):
     (wr_vals, wr_counts) = torch.unique(wr, sorted=True, return_counts=True)
@@ -67,7 +66,6 @@ def round_allbal(
             s[:, i] -= epsXTsj
         wr = torch.clamp(wr, min=0, max=2**nbits - 1)
         if ((w_hat == wr).all()):
-            sys.stderr.write(f"breaking after {ip+1} greedy passes found fixed point")
             break
         w_hat.copy_(wr)
 
@@ -123,7 +121,6 @@ def round_allbal_block(
 
         wr = torch.clamp(wr, min=0, max=2**nbits - 1)
         if ((w_hat == wr).all()):
-            sys.stderr.write(f"breaking after {ip+1} greedy passes found fixed point")
             break
         w_hat.copy_(wr)
         
@@ -189,7 +186,6 @@ def round_ldl(
             s[:, i] -= epsXTsj
         wr = torch.clamp(wr, min=0, max=2**nbits - 1)
         if ((w_hat == wr).all()):
-            sys.stderr.write(f"breaking after {igp+1} greedy passes found fixed point")
             break
         w_hat.copy_(wr)
     
@@ -281,7 +277,6 @@ def round_ldl_block(
 
         wr = torch.clamp(wr, min=0, max=2**nbits - 1)
         if ((w_hat == wr).all()):
-            sys.stderr.write(f"breaking after {igp+1} greedy passes found fixed point")
             break
         w_hat.copy_(wr)
     
