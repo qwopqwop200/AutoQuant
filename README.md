@@ -1,3 +1,11 @@
+**This code is currently a draft and I would like some help.**
+
+**We are currently experiencing the following issues:**
+
+**1.QuIP quantization process is unstable, so some quant methods do not work**
+
+**2.To inference, a new Cuda Kernel must be created.**
+
 # AutoQuant
 An easy-to-use LLMs quantization package
 
