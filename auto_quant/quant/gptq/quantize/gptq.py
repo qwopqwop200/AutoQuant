@@ -63,8 +63,6 @@ class GPTQ:
             W = W.t()
         W = W.float()
 
-        tick = time.time()
-
         if not self.quantizer.ready():
             self.quantizer.find_params(W, weight=True)
 

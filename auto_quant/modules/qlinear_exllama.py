@@ -4,6 +4,7 @@ import logging
 from typing import Optional
 import torch
 import torch.nn as nn
+import transformers
 from exllama_kernels import make_q4, q4_matmul, prepare_buffers, set_tuning_params, cleanup_buffers_cuda
 
 EXLLAMA_DEFAULT_MAX_INPUT_LENGTH = 2048
@@ -42,8 +43,8 @@ class ExllamaLinear(nn.Module):
         assert out_features % (32 // self.bits) == 0
         
         self.register_buffer('qweight',torch.zeros((in_features // 32 * bits), out_features, dtype=torch.int32, device=device))
-        self.register_buffer('qzeros',torch.zeros((math.ceil(in_features / group_size), out_features // 32 * bits), dtype=torch.int32, device=device))
-        self.register_buffer('scales',torch.zeros((math.ceil(in_features / group_size), out_features), dtype=torch.float16, device=device))
+        self.register_buffer('qzeros',torch.zeros((math.ceil(in_features / self.group_size), out_features // 32 * bits), dtype=torch.int32, device=device))
+        self.register_buffer('scales',torch.zeros((math.ceil(in_features / self.group_size), out_features), dtype=torch.float16, device=device))
         if bias:
             self.register_buffer('bias', torch.zeros((out_features), dtype=torch.float16, device=device))
         else:
@@ -71,7 +72,11 @@ class ExllamaLinear(nn.Module):
         awq_linear = self(bits, group_size, linear.in_features, linear.out_features, linear.bias is not None, act_order, linear.weight.device)
         if init_only:  # just prepare for loading sd
             return awq_linear
-        
+        W = linear.weight.data.clone()
+        if isinstance(linear, nn.Conv2d):
+            W = W.flatten(1)
+        if isinstance(linear, transformers.pytorch_utils.Conv1D):
+            W = W.t()
         # need scales and zeros info for real quantization
         assert scales is not None and zeros is not None
         scales = scales.t().contiguous()
@@ -87,9 +92,9 @@ class ExllamaLinear(nn.Module):
         intweight = []
         for idx in range(awq_linear.in_features):
             if act_order:
-                intweight.append(torch.round((linear.weight.data[:, idx] + scale_zeros[g_idx[idx]]) / awq_linear.scales[g_idx[idx]]).to(torch.int)[:, None])
+                intweight.append(torch.round((W[:, idx] + scale_zeros[g_idx[idx]]) / awq_linear.scales[g_idx[idx]]).to(torch.int)[:, None])
             else:
-                intweight.append(torch.round((linear.weight.data[:, idx] + scale_zeros[idx // group_size]) / awq_linear.scales[idx // group_size]).to(torch.int)[:, None])
+                intweight.append(torch.round((W[:, idx] + scale_zeros[idx // awq_linear.group_size]) / awq_linear.scales[idx // awq_linear.group_size]).to(torch.int)[:, None])
                 
         intweight = torch.cat(intweight, dim=1)
         intweight = intweight.t().contiguous()

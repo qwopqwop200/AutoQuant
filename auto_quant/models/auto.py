@@ -7,15 +7,18 @@ import torch
 from transformers import AutoConfig
 from transformers.utils.hub import cached_file
 from .base import BaseQuantConfig, BaseQuantForCausalLM
+from auto_quant.quant.rtn.models import AutoRTNForCausalLM, RTNConfig
 from auto_quant.quant.awq.models import AutoAWQForCausalLM, AWQConfig
 from auto_quant.quant.gptq.models import AutoGPTQForCausalLM, GPTQConfig
 
 QUANT_CONFIG_MAP = {
+    "RTN": RTNConfig,
     "AWQ": AWQConfig,
     "GPTQ": GPTQConfig,
 }
 
 QUANT_CAUSAL_LM_MODEL_MAP = {
+    "RTN": AutoRTNForCausalLM,
     "AWQ": AutoAWQForCausalLM,
     "GPTQ": AutoGPTQForCausalLM,
 }

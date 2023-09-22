@@ -178,7 +178,7 @@ class BaseGPTQForCausalLM(BaseQuantForCausalLM):
             if not check_exllama_can_save(model):
                 logging.warning("The model cannot be saved again. If you want to save the model again, set post_init=False. But in this case, inference doesn't work.")
         else:
-            logging.warning("Exllama has not been post-initialized. inference doesn't work. Please save the model and then load it.")
+            logging.warning("Exllama has not been post-initialized. inference doesn't work.")
         return self(model, quant_config, is_quantized=True)
         
     def _load_quantized_modules(self, model, quant_config):
@@ -402,6 +402,7 @@ class BaseGPTQForCausalLM(BaseQuantForCausalLM):
                         actorder=self.quant_config.act_order,
                         static_groups=self.quant_config.static_groups
                     )
+
                     quantizers[f'{self.layers_block_name}.{i}.{name}'] = (
                         move_to_device(scale, 'cpu' if force_layer_back_to_cpu else cur_layer_device),
                         move_to_device(zero, 'cpu' if force_layer_back_to_cpu else cur_layer_device),
@@ -440,7 +441,8 @@ class BaseGPTQForCausalLM(BaseQuantForCausalLM):
             self.model = simple_dispatch_model(self.model, device_map)
 
         self.model.config.use_cache = forward_pass_use_cache
-        
+        logging.warning("Exllama has not been post-initialized. inference doesn't work. Please save the model and then load it.")
+
         self.is_quantized = True
         torch.cuda.empty_cache()
             
@@ -464,4 +466,3 @@ class BaseGPTQForCausalLM(BaseQuantForCausalLM):
             set_op_by_name(self.model, name, qlayer)
             torch.cuda.empty_cache()
             gc.collect()
-        logging.warning("Exllama has not been post-initialized. inference doesn't work. Please save the model and then load it.")
