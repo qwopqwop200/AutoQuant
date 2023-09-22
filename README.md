@@ -12,6 +12,8 @@ An easy-to-use LLMs quantization package
 Unlike [AutoGPTQ](https://github.com/PanQiWei/AutoGPTQ) and [AutoAWQ](https://github.com/casper-hansen/AutoAWQ), AutoQuant aims to be a simple but expandable package. So if you want speed, I don't recommend using AutoQuant.
 
 *Latest News* 🔥
+- [WIP] Support QuIP Quantization method
+- [2023/09] Support RTN Quantization method
 - [2023/09] Support GPTQ Quantization method
 
 ## Install
@@ -75,6 +77,7 @@ print(evaluator.make_table(results))
 ## Model Quantization
 1. [GPTQ](https://arxiv.org/abs/2210.17323) released with the paper [GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers](https://arxiv.org/abs/2210.17323) by Elias Frantar, Saleh Ashkboos, Torsten Hoefler, Dan Alistarh
 2. [AWQ](https://arxiv.org/abs/2306.00978) released with the paper [AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration](https://arxiv.org/abs/2306.00978) by Ji Lin, Jiaming Tang, Haotian Tang, Shang Yang, Xingyu Dang, Song Han
+3. [QuIP](https://arxiv.org/abs/2307.13304) released with the paper [QuIP: 2-Bit Quantization of Large Language Models With Guarantees](https://arxiv.org/abs/2307.13304) by Jerry Chee, Yaohui Cai, Volodymyr Kuleshov, Christopher De Sa
 
 ## Acknowledgement
 This quantization package is inspired by the following projects: [AutoGPTQ](https://github.com/PanQiWei/AutoGPTQ),[AutoAWQ](https://github.com/casper-hansen/AutoAWQ)
